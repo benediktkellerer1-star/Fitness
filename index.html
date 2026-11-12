@@ -785,7 +785,7 @@ function sessionOf(sets) {
 }
 function isPr(cur, prev) {
   if (!prev.length) return false;
-  if (cur.top > 0) return cur.top > Math.max(...prev.map((p) => p.top));
+  if (cur.top > 0) return cur.vol > Math.max(...prev.map((p) => p.vol));
   if (prev.every((p) => p.top === 0)) return cur.maxR > Math.max(...prev.map((p) => p.maxR));
   return false;
 }
@@ -909,7 +909,7 @@ function boot() {
   }
 }
 /* Updates: version.json on the server is compared with the version built into this page. */
-const APP_VERSION = '2026-11-12.6';
+const APP_VERSION = '2026-11-12.7';
 let lastCheck = 0;
 async function checkUpdate(manual) {
   if (!manual && Date.now() - lastCheck < 60000) return; lastCheck = Date.now();
@@ -1087,9 +1087,9 @@ function renderForm() {
 function itemHtml(it, i) {
   const d = state.draft; const prev = previousSessions(it.ex, d.date, d.id);
   const last = prev[prev.length - 1];
-  const bestTop = prev.length ? Math.max(...prev.map((s) => s.top)) : 0;
+  const bestVol = prev.length ? Math.max(...prev.map((s) => s.vol)) : 0;
   const timed = isTimed(it.ex);
-  const hint = last ? `Letztes Mal am ${fmtShort(last.date)}: ${esc(setsSummary(last.sets, timed))}${bestTop > 0 ? ` · Bestwert ${fmtKg(bestTop)} kg` : ''}` : 'Erster Eintrag für diese Übung.';
+  const hint = last ? `Letztes Mal am ${fmtShort(last.date)}: ${esc(setsSummary(last.sets, timed))}${bestVol > 0 ? ` · Rekord ${fmtInt(bestVol)} kg bewegt` : ''}` : 'Erster Eintrag für diese Übung.';
   const e = state.exercises.get(it.ex);
   const topKg = Math.max(0, ...it.sets.map((s) => num(s.kg)).filter((v) => v > 0));
   const inSs = !!(it.ss || (i > 0 && d.items[i - 1].ss));
@@ -1329,7 +1329,7 @@ async function saveWorkout() {
   for (const it of items) {
     const work = it.sets.filter((x) => x.t !== 'w'); if (!work.length) continue;
     const cur = sessionOf(work); const prev = previousSessions(it.ex, d.date, id);
-    if (isPr(cur, prev)) prs.push(`${exName(it.ex)} ${cur.top > 0 ? fmtKg(cur.top) + ' kg' : cur.maxR + (isTimed(it.ex) ? ' s' : ' Wdh.')}`);
+    if (isPr(cur, prev)) prs.push(`${exName(it.ex)} ${cur.top > 0 ? fmtInt(cur.vol) + ' kg bewegt' : cur.maxR + (isTimed(it.ex) ? ' s' : ' Wdh.')}`);
   }
   const btn = $('#f-save'); btn.disabled = true;
   try { await write('workouts/' + id, 'set', doc); }
@@ -1367,13 +1367,13 @@ function editWorkout(id, opts = {}) {
 const METRICS = {
   top: { label: 'Gewicht', unit: 'kg', get: (s) => s.top, fmt: fmtKg, cap: 'Schwerster Satz pro Training in kg.' },
   e1rm: { label: '1RM', unit: 'kg', get: (s) => Math.round(s.e1rm * 10) / 10, fmt: fmtKg, cap: 'Geschätztes Maximalgewicht für eine Wiederholung, aus dem besten Satz pro Training (Epley: Gewicht × (1 + Wdh. ÷ 30)).' },
-  vol: { label: 'Volumen', unit: 'kg', get: (s) => s.vol, fmt: fmtInt, cap: 'Volumen pro Training: Summe aus Wiederholungen × Gewicht über alle Sätze.' },
+  vol: { label: 'Volumen', unit: 'kg', get: (s) => s.vol, fmt: fmtInt, cap: 'Bewegtes Gesamtgewicht pro Training: Summe aus Wiederholungen × Gewicht über alle Sätze.' },
   reps: { label: 'Wdh.', unit: 'Wdh.', get: (s) => s.maxR, fmt: fmtInt, cap: 'Meiste Wiederholungen in einem Satz pro Training.' },
 };
 function exIsBodyweight(sessions) { return sessions.every((s) => s.top === 0); }
 function metricFor(sessions) {
   const bw = exIsBodyweight(sessions); let m = state.prog.metric;
-  if (m === 'auto' || (bw && m !== 'reps')) m = bw ? 'reps' : 'top';
+  if (m === 'auto' || (bw && m !== 'reps')) m = bw ? 'reps' : 'vol';
   return m;
 }
 function progressExercises() {
@@ -1439,7 +1439,7 @@ function renderProgress() {
     color, unit: M.unit, fmt: M.fmt, label: `${exName(state.prog.ex)}, ${M.label}`,
     tip: (p) => `<b>${esc(fmtDate(p.s.date))}</b><div>${M.fmt(p.y)} ${esc(M.unit)}${p.s.pr ? ' · Bestwert' : ''}</div><div class="tm">${esc(setsSummary(p.s.sets, tm))}</div>`,
   });
-  $('#p-cap').textContent = M.cap + (sessions.some((s) => s.pr) ? ' Goldene Dreiecke markieren neue Bestwerte.' : '');
+  $('#p-cap').textContent = M.cap + (sessions.some((s) => s.pr) ? (bw ? ' Goldene Dreiecke markieren neue Bestwerte.' : ' Goldene Dreiecke markieren neue Rekorde beim bewegten Gesamtgewicht.') : '');
 
   renderRecords(state.prog.ex, sessions);
 
@@ -1482,7 +1482,7 @@ function renderRecords(exId, sessions) {
     const a = best((s) => s.top), b = best((s) => s.e1rm), c = best((s) => s.vol);
     const setVol = (s) => Math.max(...s.sets.map((x) => x.kg * x.r)); const d = best(setVol);
     const ds = d.sets.reduce((m, x) => (x.kg * x.r > m.kg * m.r ? x : m), d.sets[0]);
-    tiles = tile('Schwerstes Gewicht', fmtKg(a.top), 'kg', a) + tile('Bestes 1RM (geschätzt)', fmtKg(Math.round(b.e1rm * 10) / 10), 'kg', b) + tile('Bester Satz', `${ds.r} × ${fmtKg(ds.kg)}`, 'kg', d) + tile('Meistes Volumen', fmtInt(c.vol), 'kg', c);
+    tiles = tile('Meiste kg bewegt', fmtInt(c.vol), 'kg', c) + tile('Schwerstes Gewicht', fmtKg(a.top), 'kg', a) + tile('Bestes 1RM (geschätzt)', fmtKg(Math.round(b.e1rm * 10) / 10), 'kg', b) + tile('Bester Satz', `${ds.r} × ${fmtKg(ds.kg)}`, 'kg', d);
   }
   let rm = '';
   if (!bw) {
