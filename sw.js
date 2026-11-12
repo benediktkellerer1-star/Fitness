@@ -1,6 +1,6 @@
 /* Page: network first, so a new version shows right away when online; cache when offline.
    Icons and fonts: from cache, refreshed in the background. */
-const CACHE = 'fitness-v3';
+const CACHE = 'fitness-v4';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
@@ -11,6 +11,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   if (url.origin !== self.location.origin && !isFont) return;
+  if (url.pathname.endsWith('/version.json')) return;
   const isPage = req.mode === 'navigate' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('/');
   if (isPage) {
     e.respondWith(fetch(req, { cache: 'no-store' }).then((res) => { if (res.ok) caches.open(CACHE).then((c) => c.put('./index.html', res.clone())); return res; })

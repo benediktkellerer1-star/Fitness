@@ -849,11 +849,34 @@ function initDb() {
 function boot() {
   initDb();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* ignore */ }
+  if (location.protocol === 'https:') { setTimeout(() => checkUpdate(false), 1500); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(false); }); }
+  if (location.search.includes('u=')) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* ignore */ } }
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     const hadController = !!navigator.serviceWorker.controller; let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => { r.update().catch(() => {}); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') r.update().catch(() => {}); }); }).catch(() => {});
   }
+}
+/* Updates: version.json on the server is compared with the version built into this page. */
+const APP_VERSION = '2026-11-12.5';
+let lastCheck = 0;
+async function checkUpdate(manual) {
+  if (!manual && Date.now() - lastCheck < 60000) return; lastCheck = Date.now();
+  let remote = null;
+  try { const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) remote = (await r.json()).v; } catch (e) { remote = null; }
+  if (!remote) { if (manual) toast('Keine Verbindung. Versuch es mit Internet noch einmal.'); return; }
+  if (remote === APP_VERSION) { if (manual) toast(`Du hast die neueste Version (${APP_VERSION}).`); return; }
+  const busy = state.rest.end || (document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
+  if (manual || !busy) hardUpdate(); else { state.ui.updateAvail = remote; renderBanner(); }
+}
+async function hardUpdate() {
+  toast('Lade die neue Version …'); clearTimeout(draftTimer);
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(state.draft)); } catch (e) { /* ignore */ }
+  try {
+    if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.update().catch(() => {}))); }
+    if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); }
+  } catch (e) { /* ignore */ }
+  location.replace(location.pathname + '?u=' + Date.now() + location.hash);
 }
 const isStandalone = () => !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
 
@@ -886,6 +909,7 @@ function renderAll() {
 /* ---------- banner, toast ---------- */
 function renderBanner() {
   const b = $('#banner'); let h = '';
+  if (state.ui.updateAvail) { b.innerHTML = 'Eine neue Version ist da.<button type="button" class="link" data-act="do-update">Jetzt aktualisieren</button>'; b.hidden = false; return; }
   let hidden = false; try { hidden = localStorage.getItem('fitness-install-hint') === '1'; } catch (e) { /* ignore */ }
   if (!isStandalone() && !hidden) h = 'Tipp: In Safari auf Teilen und dann auf „Zum Home-Bildschirm“ tippen. Dann startet der Tracker wie eine App, auch offline. Wichtig: Die App auf dem Home-Bildschirm hat einen eigenen Speicher. Trag deine Trainings also erst dort ein und spiel dort dein Backup ein.<button type="button" class="link" data-act="hide-install">Ausblenden</button>';
   else if (state.dbErr) h = 'Deine Trainings konnten nicht geladen werden. Starte die App neu.';
@@ -1211,7 +1235,7 @@ function nextUpHtml(items) {
 }
 function rangeCard() {
   const def = defaultRange();
-  return `<section class="card"><h3>Einstellungen</h3><p class="small">Beim Eintragen steht bei jeder Übung, ob du das Gewicht steigern solltest. Die Regel: Schaffst du in allen Sätzen das obere Ende deines Wiederholungsbereichs, gehst du beim nächsten Training etwa 5 % hoch. Mit dem schwereren Gewicht arbeitest du dich dann wieder nach oben.</p><div class="adv-row"><label>Standardbereich <select class="inp rsel" data-chg="def-range" aria-label="Standard-Wiederholungsbereich">${RANGES.map((r) => `<option value="${r}"${r === def ? ' selected' : ''}>${rangeLabel(r)}</option>`).join('')}</select> Wdh.</label></div><p class="tiny muted">Einzelne Übungen stellst du beim Eintragen direkt an der Übung um.</p><div class="adv-row"><label>Pause nach einem Satz <select class="inp rsel" id="set-rest" data-chg="def-rest" aria-label="Pausenlänge">${RESTS.map((r) => `<option value="${r}"${r === restSecs() ? ' selected' : ''}>${fmtClock(r)} Min.</option>`).join('')}</select></label></div><div class="adv-row"><label>Langhantelstange <select class="inp rsel" id="set-bar" data-chg="def-bar" aria-label="Gewicht der Stange">${BARS.map((b) => `<option value="${b}"${b === barKg() ? ' selected' : ''}>${fmtKg(b)} kg</option>`).join('')}</select></label></div><p class="tiny muted">Die Pause startet, sobald du einen Satz abhakst. Bei einem Supersatz erst nach der zweiten Übung. Die Stange nutzt der Scheibenrechner.</p><div class="adv-row"><label>Wochenziel <select class="inp rsel" id="set-goal" data-chg="def-goal" aria-label="Wochenziel">${[1, 2, 3, 4, 5, 6, 7].map((g) => `<option value="${g}"${g === goalN() ? ' selected' : ''}>${g} ${g === 1 ? 'Einheit' : 'Einheiten'}</option>`).join('')}</select></label></div><div class="adv-row"><label>Bildschirm beim Training anlassen <select class="inp rsel" id="set-wake" data-chg="def-wake" aria-label="Bildschirm anlassen"><option value="1"${!state.settings || state.settings.wake !== false ? ' selected' : ''}>Ja</option><option value="0"${state.settings && state.settings.wake === false ? ' selected' : ''}>Nein</option></select></label></div></section>`;
+  return `<section class="card"><h3>Einstellungen</h3><p class="small">Beim Eintragen steht bei jeder Übung, ob du das Gewicht steigern solltest. Die Regel: Schaffst du in allen Sätzen das obere Ende deines Wiederholungsbereichs, gehst du beim nächsten Training etwa 5 % hoch. Mit dem schwereren Gewicht arbeitest du dich dann wieder nach oben.</p><div class="adv-row"><label>Standardbereich <select class="inp rsel" data-chg="def-range" aria-label="Standard-Wiederholungsbereich">${RANGES.map((r) => `<option value="${r}"${r === def ? ' selected' : ''}>${rangeLabel(r)}</option>`).join('')}</select> Wdh.</label></div><p class="tiny muted">Einzelne Übungen stellst du beim Eintragen direkt an der Übung um.</p><div class="adv-row"><label>Pause nach einem Satz <select class="inp rsel" id="set-rest" data-chg="def-rest" aria-label="Pausenlänge">${RESTS.map((r) => `<option value="${r}"${r === restSecs() ? ' selected' : ''}>${fmtClock(r)} Min.</option>`).join('')}</select></label></div><div class="adv-row"><label>Langhantelstange <select class="inp rsel" id="set-bar" data-chg="def-bar" aria-label="Gewicht der Stange">${BARS.map((b) => `<option value="${b}"${b === barKg() ? ' selected' : ''}>${fmtKg(b)} kg</option>`).join('')}</select></label></div><p class="tiny muted">Die Pause startet, sobald du einen Satz abhakst. Bei einem Supersatz erst nach der zweiten Übung. Die Stange nutzt der Scheibenrechner.</p><div class="adv-row"><label>Wochenziel <select class="inp rsel" id="set-goal" data-chg="def-goal" aria-label="Wochenziel">${[1, 2, 3, 4, 5, 6, 7].map((g) => `<option value="${g}"${g === goalN() ? ' selected' : ''}>${g} ${g === 1 ? 'Einheit' : 'Einheiten'}</option>`).join('')}</select></label></div><div class="adv-row"><label>Bildschirm beim Training anlassen <select class="inp rsel" id="set-wake" data-chg="def-wake" aria-label="Bildschirm anlassen"><option value="1"${!state.settings || state.settings.wake !== false ? ' selected' : ''}>Ja</option><option value="0"${state.settings && state.settings.wake === false ? ' selected' : ''}>Nein</option></select></label></div><div class="adv-row"><span class="small muted">App-Version ${APP_VERSION}</span><button type="button" class="btn sm" data-act="check-update">Nach Updates suchen</button></div></section>`;
 }
 async function createExercise(name, gid) {
   name = name.trim().replace(/\s+/g, ' ').slice(0, 60);
@@ -1842,6 +1866,8 @@ document.addEventListener('click', async (ev) => {
     case 'del-body-yes': { const id = b.dataset.id; state.confirmDel = null; try { await write('body/' + id, 'delete'); state.body.delete(id); toast('Messung gelöscht.'); } catch (e) { /* toast shown */ } renderBody(); break; }
     case 'del-routine': state.confirmDel = 'r:' + b.dataset.id; renderManage(); break;
     case 'del-routine-yes': { const id = b.dataset.id; state.confirmDel = null; try { await write('routines/' + id, 'delete'); state.routines.delete(id); toast('Routine gelöscht.'); } catch (e) { /* toast shown */ } renderAll(); break; }
+    case 'do-update': hardUpdate(); break;
+    case 'check-update': checkUpdate(true); break;
     case 'hide-backup': state.ui.hideBackup = true; renderBanner(); break;
     case 'ss': { const it = d.items[Number(b.dataset.i)]; if (!it) break; it.ss = !it.ss; persistDraft(); renderForm(); break; }
     case 'warmup': {
