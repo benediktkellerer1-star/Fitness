@@ -1,6 +1,6 @@
 /* Page: network first, so a new version shows right away when online; cache when offline.
    Icons and fonts: from cache, refreshed in the background. */
-const CACHE = 'fitness-v4';
+const CACHE = 'fitness-v5';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {
